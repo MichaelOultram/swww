@@ -1,39 +1,61 @@
 use crate::imgproc::resize::ResizeOperation;
-use image::{DynamicImage, Frames, RgbImage};
+use image::{DynamicImage, Frame, RgbImage};
 use std::time::Duration;
 use utils::comp_decomp::BitPack;
 
 #[inline]
-pub fn frame_to_rgb(frame: image::Frame) -> RgbImage {
+pub fn frame_to_rgb(frame: Frame) -> RgbImage {
     DynamicImage::ImageRgba8(frame.into_buffer()).into_rgb8()
 }
 
-pub fn compress_frames(
-    mut frames: Frames,
-    resize_operation: ResizeOperation,
-) -> Result<Vec<(BitPack, Duration)>, String> {
-    let mut compressed_frames = Vec::new();
+#[inline]
+pub fn frame_duration(frame: &Frame) -> Duration {
+    let (dur_num, dur_div) = frame.delay().numer_denom_ms();
+    Duration::from_millis((dur_num / dur_div).into())
+}
 
-    // The first frame should always exist
-    let first = frames.next().unwrap().unwrap();
-    let first_duration = first.delay().numer_denom_ms();
-    let first_duration = Duration::from_millis((first_duration.0 / first_duration.1).into());
-    let first_img = resize_operation.resize(&frame_to_rgb(first))?;
+pub struct FrameCompressor {
+    pub outputs: Vec<String>,
+    pub first_img: Vec<u8>,
+    first_duration: Duration,
+    canvas: Option<Vec<u8>>,
+    pub resize_operation: ResizeOperation,
+    compressed_frames: Vec<(BitPack, Duration)>,
+}
 
-    let mut canvas: Option<Vec<u8>> = None;
-    while let Some(Ok(frame)) = frames.next() {
-        let (dur_num, dur_div) = frame.delay().numer_denom_ms();
-        let duration = Duration::from_millis((dur_num / dur_div).into());
+impl FrameCompressor {
+    pub fn new(
+        outputs: Vec<String>,
+        first: &Frame,
+        resize_operation: ResizeOperation,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            outputs,
+            first_img: resize_operation.resize(&frame_to_rgb(first.clone()))?,
+            first_duration: frame_duration(first),
+            canvas: None,
+            resize_operation,
+            compressed_frames: Vec::new(),
+        })
+    }
 
-        let img = resize_operation.resize(&frame_to_rgb(frame))?;
-
-        compressed_frames.push((
-            BitPack::pack(canvas.as_ref().unwrap_or(&first_img), &img)?,
+    pub fn add_frame(&mut self, frame: &Frame) -> Result<(), String> {
+        let duration = frame_duration(frame);
+        let img = self.resize_operation.resize(&frame_to_rgb(frame.clone()))?;
+        self.compressed_frames.push((
+            BitPack::pack(self.canvas.as_ref().unwrap_or(&self.first_img), &img)?,
             duration,
         ));
-        canvas = Some(img);
+        self.canvas = Some(img);
+        Ok(())
     }
-    //Add the first frame we got earlier:
-    compressed_frames.push((BitPack::pack(&canvas.unwrap(), &first_img)?, first_duration));
-    Ok(compressed_frames)
+
+    pub fn done(mut self) -> Result<Vec<(BitPack, Duration)>, String> {
+        //Add the first frame we got earlier:
+        self.compressed_frames.push((
+            BitPack::pack(&self.canvas.unwrap(), &self.first_img)?,
+            self.first_duration,
+        ));
+        Ok(self.compressed_frames)
+    }
 }

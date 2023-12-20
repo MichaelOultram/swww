@@ -53,6 +53,14 @@ impl ResizeOperation {
             }
         }
     }
+
+    pub fn dimensions(&self) -> (u32, u32) {
+        match self {
+            ResizeOperation::Pad { dimensions, .. } => *dimensions,
+            ResizeOperation::ResizeFit { dimensions, .. } => *dimensions,
+            ResizeOperation::ResizeCrop { dimensions, .. } => *dimensions,
+        }
+    }
 }
 
 fn img_pad(img: &RgbImage, dimensions: (u32, u32), color: &[u8; 3]) -> Result<Vec<u8>, String> {

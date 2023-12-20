@@ -1,4 +1,6 @@
 use clap::Parser;
+use image::{Frames, RgbImage};
+use std::iter::Peekable;
 use std::{os::unix::net::UnixStream, path::PathBuf, process::Stdio, time::Duration};
 
 use utils::{
@@ -10,6 +12,7 @@ mod imgproc;
 use imgproc::*;
 
 mod cli;
+use crate::imgproc::frames::{frame_to_rgb, FrameCompressor};
 use crate::imgproc::imgbuf::ImgBuf;
 use crate::imgproc::resize::ResizeOperation;
 use cli::{ResizeStrategy, Swww};
@@ -146,10 +149,25 @@ fn make_request(args: &Swww) -> Result<Request, String> {
             let imgbuf = ImgBuf::new(&img.path)?;
             if imgbuf.is_animated() {
                 match std::thread::scope::<_, Result<_, String>>(|s1| {
-                    let animations = s1.spawn(|| make_animation_request(img, &dims, &outputs));
-                    let img_request = make_img_request(img, imgbuf, &dims, &outputs)?;
-                    let animations = animations.join().unwrap_or_else(|e| Err(format!("{e:?}")));
+                    // Convert to frames
+                    let mut frames = imgbuf.into_frames()?.peekable();
 
+                    // Peek first image for make_img_request
+                    let first = frame_to_rgb(
+                        frames
+                            .peek()
+                            .ok_or("Missing first frame")?
+                            .as_ref()
+                            .map_err(|e| format!("failed to decode: {e}"))?
+                            .clone(),
+                    );
+
+                    let img_request = s1.spawn(|| make_img_request(img, first, &dims, &outputs));
+                    let animations = make_animation_request(img, frames, &dims, &outputs);
+
+                    let img_request = img_request
+                        .join()
+                        .map_err(|e| format!("failed to make img_request: {e:#?}"))??;
                     let socket = connect_to_socket(5, 100)?;
                     Request::Img(img_request).send(&socket)?;
                     let bytes = read_socket(&socket)?;
@@ -163,8 +181,12 @@ fn make_request(args: &Swww) -> Result<Request, String> {
                     Err(e) => Err(format!("failed to create animated request: {e}")),
                 }
             } else {
+                let img_raw = imgbuf
+                    .decode()
+                    .map_err(|e| format!("failed to decode: {}", e))?
+                    .to_rgb8();
                 Ok(Request::Img(make_img_request(
-                    img, imgbuf, &dims, &outputs,
+                    img, img_raw, &dims, &outputs,
                 )?))
             }
         }
@@ -176,16 +198,12 @@ fn make_request(args: &Swww) -> Result<Request, String> {
 
 fn make_img_request(
     img: &cli::Img,
-    imgbuf: ImgBuf,
+    img_raw: RgbImage,
     dims: &[(u32, u32)],
     outputs: &[Vec<String>],
 ) -> Result<ipc::ImageRequest, String> {
     let transition = transition::make_transition(img);
     let mut unique_requests = Vec::with_capacity(dims.len());
-    let img_raw = imgbuf
-        .decode()
-        .map_err(|e| format!("failed to decode: {}", e))?
-        .to_rgb8();
     for (dim, outputs) in dims.iter().zip(outputs) {
         unique_requests.push((
             ipc::Img {
@@ -261,10 +279,18 @@ fn get_dimensions_and_outputs(
 
 fn make_animation_request(
     img: &cli::Img,
+    mut frames: Peekable<Frames>,
     dims: &[(u32, u32)],
     outputs: &[Vec<String>],
 ) -> Result<AnimationRequest, String> {
     let mut animations = Vec::with_capacity(dims.len());
+
+    let first = frames
+        .next()
+        .ok_or("Missing first frame")?
+        .map_err(|e| format!("Failed to decode: {e}"))?;
+
+    let mut frame_compressors = Vec::new();
     for (dim, outputs) in dims.iter().zip(outputs) {
         //TODO: make cache work for all resize strategies
         if img.resize == ResizeStrategy::Crop {
@@ -278,16 +304,31 @@ fn make_animation_request(
             }
         }
 
-        let imgbuf = ImgBuf::new(&img.path)?;
-        let frames = imgbuf.into_frames()?;
         let resize_operation = ResizeOperation::new(img, *dim);
+        frame_compressors.push(FrameCompressor::new(
+            outputs.clone(),
+            &first,
+            resize_operation,
+        )?);
+    }
+
+    for frame in frames {
+        let frame = frame.map_err(|e| format!("Failed to decode: {e}"))?;
+        for frame_compressor in &mut frame_compressors {
+            frame_compressor.add_frame(&frame)?
+        }
+    }
+
+    for frame_compressor in frame_compressors {
+        let outputs = frame_compressor.outputs.to_owned().into_boxed_slice();
         let animation = ipc::Animation {
             path: img.path.to_string_lossy().to_string(),
-            dimensions: *dim,
-            animation: frames::compress_frames(frames, resize_operation)?.into_boxed_slice(),
+            dimensions: frame_compressor.resize_operation.dimensions(),
+            animation: frame_compressor.done()?.into_boxed_slice(),
         };
-        animations.push((animation, outputs.to_owned().into_boxed_slice()));
+        animations.push((animation, outputs));
     }
+
     Ok(animations.into_boxed_slice())
 }
 
