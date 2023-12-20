@@ -1,13 +1,61 @@
+use crate::cli::{Img, ResizeStrategy};
 use crate::imgproc;
+use crate::imgproc::make_filter;
 use fast_image_resize::{FilterType, PixelType, Resizer};
 use image::RgbImage;
 use std::num::NonZeroU32;
 
-pub fn img_pad(
-    mut img: RgbImage,
-    dimensions: (u32, u32),
-    color: &[u8; 3],
-) -> Result<Vec<u8>, String> {
+pub enum ResizeOperation {
+    Pad {
+        dimensions: (u32, u32),
+        color: [u8; 3],
+    },
+    ResizeFit {
+        dimensions: (u32, u32),
+        filter: FilterType,
+        padding_color: [u8; 3],
+    },
+    ResizeCrop {
+        dimensions: (u32, u32),
+        filter: FilterType,
+    },
+}
+
+impl ResizeOperation {
+    pub(crate) fn new(img: &Img, dimensions: (u32, u32)) -> Self {
+        match img.resize {
+            ResizeStrategy::No => ResizeOperation::Pad {
+                dimensions,
+                color: img.fill_color,
+            },
+            ResizeStrategy::Crop => ResizeOperation::ResizeCrop {
+                dimensions,
+                filter: make_filter(&img.filter),
+            },
+            ResizeStrategy::Fit => ResizeOperation::ResizeFit {
+                dimensions,
+                filter: make_filter(&img.filter),
+                padding_color: img.fill_color,
+            },
+        }
+    }
+
+    pub fn resize(&self, img: RgbImage) -> Result<Vec<u8>, String> {
+        match self {
+            ResizeOperation::Pad { dimensions, color } => img_pad(img, *dimensions, color),
+            ResizeOperation::ResizeFit {
+                dimensions,
+                filter,
+                padding_color,
+            } => img_resize_fit(img, *dimensions, *filter, padding_color),
+            ResizeOperation::ResizeCrop { dimensions, filter } => {
+                img_resize_crop(img, *dimensions, *filter)
+            }
+        }
+    }
+}
+
+fn img_pad(mut img: RgbImage, dimensions: (u32, u32), color: &[u8; 3]) -> Result<Vec<u8>, String> {
     let (padded_w, padded_h) = dimensions;
     let (padded_w, padded_h) = (padded_w as usize, padded_h as usize);
     let mut padded = Vec::with_capacity(padded_h * padded_w * 3);
@@ -58,7 +106,7 @@ pub fn img_pad(
 
 /// Resize an image to fit within the given dimensions, covering as much space as possible without
 /// cropping.
-pub fn img_resize_fit(
+fn img_resize_fit(
     img: RgbImage,
     dimensions: (u32, u32),
     filter: FilterType,
@@ -120,7 +168,7 @@ pub fn img_resize_fit(
     }
 }
 
-pub fn img_resize_crop(
+fn img_resize_crop(
     img: RgbImage,
     dimensions: (u32, u32),
     filter: FilterType,

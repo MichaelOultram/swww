@@ -11,6 +11,7 @@ mod imgproc;
 use imgproc::*;
 
 mod cli;
+use crate::imgproc::resize::ResizeOperation;
 use cli::{ResizeStrategy, Swww};
 
 fn main() -> Result<(), String> {
@@ -187,19 +188,9 @@ fn make_img_request(
     for (dim, outputs) in dims.iter().zip(outputs) {
         unique_requests.push((
             ipc::Img {
-                img: match img.resize {
-                    ResizeStrategy::No => resize::img_pad(img_raw.clone(), *dim, &img.fill_color)?,
-                    ResizeStrategy::Crop => {
-                        resize::img_resize_crop(img_raw.clone(), *dim, make_filter(&img.filter))?
-                    }
-                    ResizeStrategy::Fit => resize::img_resize_fit(
-                        img_raw.clone(),
-                        *dim,
-                        make_filter(&img.filter),
-                        &img.fill_color,
-                    )?,
-                }
-                .into_boxed_slice(),
+                img: ResizeOperation::new(img, *dim)
+                    .resize(img_raw.clone())?
+                    .into_boxed_slice(),
                 path: match img.path.canonicalize() {
                     Ok(p) => p.to_string_lossy().to_string(),
                     Err(e) => {
@@ -272,7 +263,6 @@ fn make_animation_request(
     dims: &[(u32, u32)],
     outputs: &[Vec<String>],
 ) -> Result<AnimationRequest, String> {
-    let filter = make_filter(&img.filter);
     let mut animations = Vec::with_capacity(dims.len());
     for (dim, outputs) in dims.iter().zip(outputs) {
         //TODO: make cache work for all resize strategies
@@ -295,11 +285,11 @@ fn make_animation_request(
             Ok(gif) => gif,
             Err(e) => return Err(format!("failed to decode gif during animation: {e}")),
         };
+        let resize_operation = ResizeOperation::new(img, *dim);
         let animation = ipc::Animation {
             path: img.path.to_string_lossy().to_string(),
             dimensions: *dim,
-            animation: frames::compress_frames(gif, *dim, filter, img.resize, &img.fill_color)?
-                .into_boxed_slice(),
+            animation: frames::compress_frames(gif, resize_operation)?.into_boxed_slice(),
         };
         animations.push((animation, outputs.to_owned().into_boxed_slice()));
     }
