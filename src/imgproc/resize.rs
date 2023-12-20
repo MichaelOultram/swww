@@ -40,7 +40,7 @@ impl ResizeOperation {
         }
     }
 
-    pub fn resize(&self, img: RgbImage) -> Result<Vec<u8>, String> {
+    pub fn resize(&self, img: &RgbImage) -> Result<Vec<u8>, String> {
         match self {
             ResizeOperation::Pad { dimensions, color } => img_pad(img, *dimensions, color),
             ResizeOperation::ResizeFit {
@@ -55,12 +55,12 @@ impl ResizeOperation {
     }
 }
 
-fn img_pad(mut img: RgbImage, dimensions: (u32, u32), color: &[u8; 3]) -> Result<Vec<u8>, String> {
+fn img_pad(img: &RgbImage, dimensions: (u32, u32), color: &[u8; 3]) -> Result<Vec<u8>, String> {
     let (padded_w, padded_h) = dimensions;
     let (padded_w, padded_h) = (padded_w as usize, padded_h as usize);
     let mut padded = Vec::with_capacity(padded_h * padded_w * 3);
 
-    let img = image::imageops::crop(&mut img, 0, 0, dimensions.0, dimensions.1).to_image();
+    let img = image::imageops::crop_imm(img, 0, 0, dimensions.0, dimensions.1).to_image();
     let (img_w, img_h) = img.dimensions();
     let (img_w, img_h) = (img_w as usize, img_h as usize);
     let raw_img = img.into_vec();
@@ -107,7 +107,7 @@ fn img_pad(mut img: RgbImage, dimensions: (u32, u32), color: &[u8; 3]) -> Result
 /// Resize an image to fit within the given dimensions, covering as much space as possible without
 /// cropping.
 fn img_resize_fit(
-    img: RgbImage,
+    img: &RgbImage,
     dimensions: (u32, u32),
     filter: FilterType,
     padding_color: &[u8; 3],
@@ -135,7 +135,7 @@ fn img_resize_fit(
             // We unwrap below because we know the images's dimensions should never be 0
             NonZeroU32::new(img_w).unwrap(),
             NonZeroU32::new(img_h).unwrap(),
-            img.into_raw(),
+            img.clone().into_raw(),
             PixelType::U8x3,
         ) {
             Ok(i) => i,
@@ -155,12 +155,12 @@ fn img_resize_fit(
         }
 
         img_pad(
-            image::RgbImage::from_raw(trg_w, trg_h, dst.into_vec()).unwrap(),
+            &RgbImage::from_raw(trg_w, trg_h, dst.into_vec()).unwrap(),
             dimensions,
             padding_color,
         )
     } else {
-        let mut res = img.into_vec();
+        let mut res = img.clone().into_vec();
         // The ARGB is 'little endian', so here we must  put the order
         // of bytes 'in reverse', so it needs to be BGRA.
         imgproc::rgb_to_brg(&mut res);
@@ -169,7 +169,7 @@ fn img_resize_fit(
 }
 
 fn img_resize_crop(
-    img: RgbImage,
+    img: &RgbImage,
     dimensions: (u32, u32),
     filter: FilterType,
 ) -> Result<Vec<u8>, String> {
@@ -180,7 +180,7 @@ fn img_resize_crop(
             // We unwrap below because we know the images's dimensions should never be 0
             NonZeroU32::new(img_w).unwrap(),
             NonZeroU32::new(img_h).unwrap(),
-            img.into_raw(),
+            img.clone().into_raw(),
             PixelType::U8x3,
         ) {
             Ok(i) => i,
@@ -203,7 +203,7 @@ fn img_resize_crop(
 
         dst.into_vec()
     } else {
-        img.into_vec()
+        img.clone().into_vec()
     };
 
     // The ARGB is 'little endian', so here we must  put the order

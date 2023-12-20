@@ -22,14 +22,14 @@ pub fn compress_frames(
     let first = frames.next().unwrap().unwrap();
     let first_duration = first.delay().numer_denom_ms();
     let first_duration = Duration::from_millis((first_duration.0 / first_duration.1).into());
-    let first_img = resize_operation.resize(frame_to_rgb(first))?;
+    let first_img = resize_operation.resize(&frame_to_rgb(first))?;
 
     let mut canvas: Option<Vec<u8>> = None;
     while let Some(Ok(frame)) = frames.next() {
         let (dur_num, dur_div) = frame.delay().numer_denom_ms();
         let duration = Duration::from_millis((dur_num / dur_div).into());
 
-        let img = resize_operation.resize(frame_to_rgb(frame))?;
+        let img = resize_operation.resize(&frame_to_rgb(frame))?;
 
         compressed_frames.push((
             BitPack::pack(canvas.as_ref().unwrap_or(&first_img), &img)?,

@@ -147,7 +147,7 @@ fn make_request(args: &Swww) -> Result<Request, String> {
             if is_gif {
                 match std::thread::scope::<_, Result<_, String>>(|s1| {
                     let animations = s1.spawn(|| make_animation_request(img, &dims, &outputs));
-                    let img_request = make_img_request(img, img_raw, &dims, &outputs)?;
+                    let img_request = make_img_request(img, &img_raw, &dims, &outputs)?;
                     let animations = match animations.join() {
                         Ok(a) => a,
                         Err(e) => Err(format!("{e:?}")),
@@ -167,7 +167,7 @@ fn make_request(args: &Swww) -> Result<Request, String> {
                 }
             } else {
                 Ok(Request::Img(make_img_request(
-                    img, img_raw, &dims, &outputs,
+                    img, &img_raw, &dims, &outputs,
                 )?))
             }
         }
@@ -179,7 +179,7 @@ fn make_request(args: &Swww) -> Result<Request, String> {
 
 fn make_img_request(
     img: &cli::Img,
-    img_raw: image::RgbImage,
+    img_raw: &image::RgbImage,
     dims: &[(u32, u32)],
     outputs: &[Vec<String>],
 ) -> Result<ipc::ImageRequest, String> {
@@ -189,7 +189,7 @@ fn make_img_request(
         unique_requests.push((
             ipc::Img {
                 img: ResizeOperation::new(img, *dim)
-                    .resize(img_raw.clone())?
+                    .resize(img_raw)?
                     .into_boxed_slice(),
                 path: match img.path.canonicalize() {
                     Ok(p) => p.to_string_lossy().to_string(),
