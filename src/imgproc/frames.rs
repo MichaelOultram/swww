@@ -1,8 +1,5 @@
 use crate::imgproc::resize::ResizeOperation;
-use image::codecs::gif::GifDecoder;
-use image::{AnimationDecoder, DynamicImage, RgbImage};
-use std::fs::File;
-use std::io::BufReader;
+use image::{DynamicImage, Frames, RgbImage};
 use std::time::Duration;
 use utils::comp_decomp::BitPack;
 
@@ -12,11 +9,10 @@ pub fn frame_to_rgb(frame: image::Frame) -> RgbImage {
 }
 
 pub fn compress_frames(
-    gif: GifDecoder<BufReader<File>>,
+    mut frames: Frames,
     resize_operation: ResizeOperation,
 ) -> Result<Vec<(BitPack, Duration)>, String> {
     let mut compressed_frames = Vec::new();
-    let mut frames = gif.into_frames();
 
     // The first frame should always exist
     let first = frames.next().unwrap().unwrap();

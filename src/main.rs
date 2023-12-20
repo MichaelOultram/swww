@@ -1,5 +1,4 @@
 use clap::Parser;
-use image::codecs::gif::GifDecoder;
 use std::{os::unix::net::UnixStream, path::PathBuf, process::Stdio, time::Duration};
 
 use utils::{
@@ -11,6 +10,7 @@ mod imgproc;
 use imgproc::*;
 
 mod cli;
+use crate::imgproc::imgbuf::ImgBuf;
 use crate::imgproc::resize::ResizeOperation;
 use cli::{ResizeStrategy, Swww};
 
@@ -143,15 +143,12 @@ fn make_request(args: &Swww) -> Result<Request, String> {
         Swww::Img(img) => {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
             let (dims, outputs) = get_dimensions_and_outputs(&requested_outputs)?;
-            let (img_raw, is_gif) = imgbuf::read_img(&img.path)?;
-            if is_gif {
+            let imgbuf = ImgBuf::new(&img.path)?;
+            if imgbuf.is_animated() {
                 match std::thread::scope::<_, Result<_, String>>(|s1| {
                     let animations = s1.spawn(|| make_animation_request(img, &dims, &outputs));
-                    let img_request = make_img_request(img, &img_raw, &dims, &outputs)?;
-                    let animations = match animations.join() {
-                        Ok(a) => a,
-                        Err(e) => Err(format!("{e:?}")),
-                    };
+                    let img_request = make_img_request(img, imgbuf, &dims, &outputs)?;
+                    let animations = animations.join().unwrap_or_else(|e| Err(format!("{e:?}")));
 
                     let socket = connect_to_socket(5, 100)?;
                     Request::Img(img_request).send(&socket)?;
@@ -167,7 +164,7 @@ fn make_request(args: &Swww) -> Result<Request, String> {
                 }
             } else {
                 Ok(Request::Img(make_img_request(
-                    img, &img_raw, &dims, &outputs,
+                    img, imgbuf, &dims, &outputs,
                 )?))
             }
         }
@@ -179,17 +176,21 @@ fn make_request(args: &Swww) -> Result<Request, String> {
 
 fn make_img_request(
     img: &cli::Img,
-    img_raw: &image::RgbImage,
+    imgbuf: ImgBuf,
     dims: &[(u32, u32)],
     outputs: &[Vec<String>],
 ) -> Result<ipc::ImageRequest, String> {
     let transition = transition::make_transition(img);
     let mut unique_requests = Vec::with_capacity(dims.len());
+    let img_raw = imgbuf
+        .decode()
+        .map_err(|e| format!("failed to decode: {}", e))?
+        .to_rgb8();
     for (dim, outputs) in dims.iter().zip(outputs) {
         unique_requests.push((
             ipc::Img {
                 img: ResizeOperation::new(img, *dim)
-                    .resize(img_raw)?
+                    .resize(&img_raw)?
                     .into_boxed_slice(),
                 path: match img.path.canonicalize() {
                     Ok(p) => p.to_string_lossy().to_string(),
@@ -277,19 +278,13 @@ fn make_animation_request(
             }
         }
 
-        let imgbuf = match image::io::Reader::open(&img.path) {
-            Ok(img) => img.into_inner(),
-            Err(e) => return Err(format!("error opening image during animation: {e}")),
-        };
-        let gif = match GifDecoder::new(imgbuf) {
-            Ok(gif) => gif,
-            Err(e) => return Err(format!("failed to decode gif during animation: {e}")),
-        };
+        let imgbuf = ImgBuf::new(&img.path)?;
+        let frames = imgbuf.into_frames()?;
         let resize_operation = ResizeOperation::new(img, *dim);
         let animation = ipc::Animation {
             path: img.path.to_string_lossy().to_string(),
             dimensions: *dim,
-            animation: frames::compress_frames(gif, resize_operation)?.into_boxed_slice(),
+            animation: frames::compress_frames(frames, resize_operation)?.into_boxed_slice(),
         };
         animations.push((animation, outputs.to_owned().into_boxed_slice()));
     }
