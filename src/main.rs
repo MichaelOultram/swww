@@ -142,7 +142,7 @@ fn make_request(args: &Swww) -> Result<Request, String> {
         Swww::Img(img) => {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
             let (dims, outputs) = get_dimensions_and_outputs(&requested_outputs)?;
-            let (img_raw, is_gif) = read_img(&img.path)?;
+            let (img_raw, is_gif) = imgbuf::read_img(&img.path)?;
             if is_gif {
                 match std::thread::scope::<_, Result<_, String>>(|s1| {
                     let animations = s1.spawn(|| make_animation_request(img, &dims, &outputs));
@@ -182,17 +182,17 @@ fn make_img_request(
     dims: &[(u32, u32)],
     outputs: &[Vec<String>],
 ) -> Result<ipc::ImageRequest, String> {
-    let transition = make_transition(img);
+    let transition = transition::make_transition(img);
     let mut unique_requests = Vec::with_capacity(dims.len());
     for (dim, outputs) in dims.iter().zip(outputs) {
         unique_requests.push((
             ipc::Img {
                 img: match img.resize {
-                    ResizeStrategy::No => img_pad(img_raw.clone(), *dim, &img.fill_color)?,
+                    ResizeStrategy::No => resize::img_pad(img_raw.clone(), *dim, &img.fill_color)?,
                     ResizeStrategy::Crop => {
-                        img_resize_crop(img_raw.clone(), *dim, make_filter(&img.filter))?
+                        resize::img_resize_crop(img_raw.clone(), *dim, make_filter(&img.filter))?
                     }
-                    ResizeStrategy::Fit => img_resize_fit(
+                    ResizeStrategy::Fit => resize::img_resize_fit(
                         img_raw.clone(),
                         *dim,
                         make_filter(&img.filter),
@@ -298,7 +298,7 @@ fn make_animation_request(
         let animation = ipc::Animation {
             path: img.path.to_string_lossy().to_string(),
             dimensions: *dim,
-            animation: compress_frames(gif, *dim, filter, img.resize, &img.fill_color)?
+            animation: frames::compress_frames(gif, *dim, filter, img.resize, &img.fill_color)?
                 .into_boxed_slice(),
         };
         animations.push((animation, outputs.to_owned().into_boxed_slice()));
