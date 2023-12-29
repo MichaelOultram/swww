@@ -1,0 +1,48 @@
+name: Test
+
+on:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mozilla-actions/sccache-action@v0.0.3
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+      - run: cargo install cargo-nextest cargo-llvm-cov
+      - name: Run tests
+        run: cargo llvm-cov --workspace --locked nextest --html --features ci
+      - name: Upload test report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: report
+          path: target/nextest/default/report.xml
+          retention-days: 30
+      - name: Upload coverage results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: coverage
+          path: target/llvm-cov/
+          retention-days: 30
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mozilla-actions/sccache-action@v0.0.3
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.67.0
+      - run: cargo install cargo-nextest
+      - run: cargo build --workspace --locked --verbose
+      - run: cargo nextest run --workspace --locked
