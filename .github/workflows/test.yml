@@ -51,9 +51,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: mozilla-actions/sccache-action@v0.0.3
+      - uses: SebRollen/toml-action@v1.0.2
+        id: msrv
+        with:
+          file: 'Cargo.toml'
+          field: 'package.rust-version'
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.70.0
+          toolchain: ${{ steps.msrv.outputs.value }}
       - uses: taiki-e/install-action@cargo-nextest
       - run: cargo build --workspace --locked --verbose
       - run: cargo nextest run --workspace --locked
