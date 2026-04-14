@@ -26,4 +26,4 @@ sd-notify = { version = "0.4.1" }
 
 utils = { version = "0.9.1-master", path = "../utils" }
 [dev-dependencies]
-rand = "0.8"
+rand = "0.9"

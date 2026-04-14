@@ -33,7 +33,7 @@ strip = false
 image = "0.25"
 fast_image_resize = "3.0"
 clap = { version = "4.5", features = ["derive", "wrap_help", "env"] }
-rand = "0.8"
+rand = "0.9"
 utils = { version = "0.9.1-master", path = "utils" }
 
 [dev-dependencies]
